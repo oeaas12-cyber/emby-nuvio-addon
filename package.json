@@ -1,0 +1,14 @@
+{
+  "name": "emby-nuvio-addon",
+  "version": "1.0.0",
+  "description": "Direct Emby-to-Nuvio (Stremio protocol) addon using username/password login",
+  "main": "addon.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node addon.js"
+  },
+  "dependencies": {
+    "stremio-addon-sdk": "^1.6.10",
+    "node-fetch": "^2.7.0"
+  }
+}
