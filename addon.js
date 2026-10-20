@@ -473,12 +473,16 @@ function parseExtra(str) {
 }
 
 const configurePage = path.join(__dirname, 'configure.html');
+// BeamUp's Cloudflare caches pages for hours unless told not to, which
+// kept serving old configure pages after a deploy.
 app.get(['/', '/configure', '/:cfg/configure'], function (req, res) {
-  res.sendFile(configurePage);
+  res.setHeader('Cache-Control', 'no-store');
+  res.sendFile(configurePage, { cacheControl: false, etag: false, lastModified: false });
 });
 
 // Configure page backend: log in (or validate a token) and list libraries.
 app.post('/api/connect', async function (req, res) {
+  res.setHeader('Cache-Control', 'no-store');
   try {
     const body = req.body || {};
     if (!body.embyUrl) throw new Error('Server URL is required');
