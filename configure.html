@@ -30,6 +30,7 @@
   .hdr { display:flex; justify-content:space-between; align-items:center; }
   .hdr a { color:var(--dim); font-size:.85rem; cursor:pointer; }
   textarea { width:100%; min-height:90px; margin-top:8px; padding:10px; border-radius:8px; border:1px solid var(--line); background:#0c0e12; color:var(--text); font:12px/1.4 ui-monospace,monospace; word-break:break-all; }
+  label.inline { display:flex; align-items:center; gap:6px; margin-top:8px; }
   .hidden { display:none; }
 </style>
 </head>
@@ -44,18 +45,19 @@
       <button type="button" id="tabToken">Access token</button>
     </div>
     <label for="embyUrl">Emby server URL</label>
-    <input type="url" id="embyUrl" placeholder="https://your-server.example.com" autocomplete="url">
+    <input type="url" id="embyUrl" placeholder="https://your-server.example.com" autocomplete="url" autocapitalize="none" autocorrect="off" spellcheck="false">
     <div id="loginFields">
       <label for="username">Username</label>
-      <input type="text" id="username" autocomplete="username">
+      <input type="text" id="username" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false">
       <label for="password">Password</label>
-      <input type="password" id="password" autocomplete="current-password">
+      <input type="password" id="password" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false">
+      <label class="inline"><input type="checkbox" id="showPw"> Show password</label>
     </div>
     <div id="tokenFields" class="hidden">
       <label for="userId">User ID</label>
-      <input type="text" id="userId">
+      <input type="text" id="userId" autocapitalize="none" autocorrect="off" spellcheck="false">
       <label for="accessToken">Access token</label>
-      <input type="text" id="accessToken">
+      <input type="text" id="accessToken" autocapitalize="none" autocorrect="off" spellcheck="false">
     </div>
     <div class="row"><button type="button" id="connect">Connect</button></div>
     <div id="status"></div>
@@ -90,6 +92,7 @@
   }
   $('#tabLogin').onclick = () => setMode('login');
   $('#tabToken').onclick = () => setMode('token');
+  $('#showPw').onchange = (e) => { $('#password').type = e.target.checked ? 'text' : 'password'; };
 
   function status(msg, isErr) {
     $('#status').textContent = msg;

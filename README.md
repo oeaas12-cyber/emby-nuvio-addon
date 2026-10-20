@@ -10,12 +10,18 @@ A Nuvio / Stremio addon that turns your Emby server into browsable catalogs and 
 
 ## Use it
 
+**Configure page:** https://af5eae35815f-emby-direct.baby-beamup.club/configure
+
 Open the configure page, connect with your Emby server URL and either your
 username/password or a user ID + access token, choose libraries, and install the
 generated URL in Nuvio (Settings → Addons) or Stremio.
 
 The generated install URL contains your Emby access token. Keep it private.
 Your password is only used once to obtain that token and is never stored.
+
+If Emby rejects your password, use the **Access token** tab instead with your
+Emby user ID and an access token or API key (an admin can create one under
+Dashboard → Advanced → API Keys).
 
 ## Run locally
 
