@@ -75,6 +75,11 @@ async function embyLogin(embyUrl, username, password) {
     headers: { 'Content-Type': 'application/json', 'X-Emby-Authorization': authHeader },
     body: JSON.stringify({ Username: username, Pw: password || '' })
   });
+  // Phone keyboards and password managers sometimes add a stray space;
+  // retry once without it before giving up.
+  if (res.status === 401 && password && password !== password.trim()) {
+    return embyLogin(embyUrl, username, password.trim());
+  }
   if (res.status === 401) {
     throw new Error('Emby rejected this username or password. Check them in the Emby app, or use the Access token tab.');
   }

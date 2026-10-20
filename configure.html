@@ -43,9 +43,12 @@
     <div class="tabs">
       <button type="button" id="tabLogin" class="on">Username &amp; password</button>
       <button type="button" id="tabToken">Access token</button>
+      <button type="button" id="tabLink">Addon link</button>
     </div>
+    <div id="urlField">
     <label for="embyUrl">Emby server URL</label>
     <input type="url" id="embyUrl" placeholder="https://your-server.example.com" autocomplete="url" autocapitalize="none" autocorrect="off" spellcheck="false">
+    </div>
     <div id="loginFields">
       <label for="username">Username</label>
       <input type="text" id="username" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false">
@@ -58,6 +61,10 @@
       <input type="text" id="userId" autocapitalize="none" autocorrect="off" spellcheck="false">
       <label for="accessToken">Access token</label>
       <input type="text" id="accessToken" autocapitalize="none" autocorrect="off" spellcheck="false">
+    </div>
+    <div id="linkFields" class="hidden">
+      <label for="importLink">Paste an existing install link (StreamBridge or Emby Direct)</label>
+      <textarea id="importLink" placeholder="https://…/eyJ…/manifest.json" autocapitalize="none" autocorrect="off" spellcheck="false"></textarea>
     </div>
     <div class="row"><button type="button" id="connect">Connect</button></div>
     <div id="status"></div>
@@ -87,16 +94,35 @@
     mode = m;
     $('#tabLogin').classList.toggle('on', m === 'login');
     $('#tabToken').classList.toggle('on', m === 'token');
+    $('#tabLink').classList.toggle('on', m === 'link');
+    $('#urlField').classList.toggle('hidden', m === 'link');
     $('#loginFields').classList.toggle('hidden', m !== 'login');
     $('#tokenFields').classList.toggle('hidden', m !== 'token');
+    $('#linkFields').classList.toggle('hidden', m !== 'link');
   }
   $('#tabLogin').onclick = () => setMode('login');
   $('#tabToken').onclick = () => setMode('token');
+  $('#tabLink').onclick = () => setMode('link');
   $('#showPw').onchange = (e) => { $('#password').type = e.target.checked ? 'text' : 'password'; };
 
   function status(msg, isErr) {
     $('#status').textContent = msg;
     $('#status').classList.toggle('err', !!isErr);
+  }
+
+  // Finds the base64 config segment in an install link, e.g.
+  // https://host/<config>/manifest.json or …/<config>/configure.
+  function configFromLink(link) {
+    const segments = String(link).trim().replace(/^[a-z]+:\/\//i, '').split(/[/?#]/);
+    for (const seg of segments) {
+      if (seg.length < 20) continue;
+      try {
+        const raw = JSON.parse(atob(decodeURIComponent(seg).replace(/-/g, '+').replace(/_/g, '/')));
+        const embyUrl = raw.embyUrl || raw.serverUrl;
+        if (embyUrl && raw.userId && raw.accessToken) return { embyUrl, userId: raw.userId, accessToken: raw.accessToken, libs: raw.libs };
+      } catch (e) { /* not a config segment */ }
+    }
+    return null;
   }
 
   function b64url(obj) {
@@ -176,8 +202,12 @@
     const embyUrl = $('#embyUrl').value.trim();
     if (mode === 'login') {
       connect({ embyUrl, username: $('#username').value.trim(), password: $('#password').value });
-    } else {
+    } else if (mode === 'token') {
       connect({ embyUrl, userId: $('#userId').value.trim(), accessToken: $('#accessToken').value.trim() });
+    } else {
+      const cfg = configFromLink($('#importLink').value);
+      if (!cfg) return status("That link doesn't contain an Emby server, user ID and token", true);
+      connect({ embyUrl: cfg.embyUrl, userId: cfg.userId, accessToken: cfg.accessToken }, cfg.libs);
     }
   };
 
@@ -189,18 +219,13 @@
 
   // Reconfigure: /<config>/configure pre-fills from the existing install.
   (function prefill() {
-    const seg = location.pathname.split('/').filter(Boolean);
-    if (seg.length < 2) return;
-    try {
-      const raw = JSON.parse(atob(seg[0].replace(/-/g, '+').replace(/_/g, '/')));
-      const embyUrl = raw.embyUrl || raw.serverUrl;
-      if (!embyUrl || !raw.userId || !raw.accessToken) return;
-      $('#embyUrl').value = embyUrl;
-      $('#userId').value = raw.userId;
-      $('#accessToken').value = raw.accessToken;
-      setMode('token');
-      connect({ embyUrl, userId: raw.userId, accessToken: raw.accessToken }, raw.libs);
-    } catch (e) { /* not a config segment */ }
+    const cfg = configFromLink(location.pathname);
+    if (!cfg) return;
+    $('#embyUrl').value = cfg.embyUrl;
+    $('#userId').value = cfg.userId;
+    $('#accessToken').value = cfg.accessToken;
+    setMode('token');
+    connect({ embyUrl: cfg.embyUrl, userId: cfg.userId, accessToken: cfg.accessToken }, cfg.libs);
   })();
 </script>
 </body>
