@@ -75,6 +75,9 @@ async function embyLogin(embyUrl, username, password) {
     headers: { 'Content-Type': 'application/json', 'X-Emby-Authorization': authHeader },
     body: JSON.stringify({ Username: username, Pw: password || '' })
   });
+  if (res.status === 401) {
+    throw new Error('Emby rejected this username or password. Check them in the Emby app, or use the Access token tab.');
+  }
   if (!res.ok) {
     const text = await res.text().catch(function () { return ''; });
     throw new Error('Emby login failed (' + res.status + '): ' + (text || res.statusText));
