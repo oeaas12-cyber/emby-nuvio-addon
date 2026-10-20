@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Emby Direct</title>
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --line:#2a2f3a; --text:#e8eaf0; --dim:#9aa1b2; --accent:#52b54b; --err:#ef4444; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; padding:24px 16px; }
+  main { max-width:560px; margin:0 auto; }
+  h1 { font-size:1.5rem; margin:0 0 4px; }
+  p.sub { color:var(--dim); margin:0 0 20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:16px; }
+  label { display:block; font-size:.85rem; color:var(--dim); margin:12px 0 4px; }
+  input[type=text], input[type=password], input[type=url] { width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--line); background:#0c0e12; color:var(--text); font:inherit; }
+  .tabs { display:flex; gap:8px; margin-bottom:4px; }
+  .tabs button { flex:1; background:transparent; color:var(--dim); border:1px solid var(--line); }
+  .tabs button.on { color:var(--text); border-color:var(--accent); }
+  button { padding:10px 14px; border-radius:8px; border:0; background:var(--accent); color:#fff; font:inherit; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.6; cursor:default; }
+  .row { display:flex; gap:8px; margin-top:16px; flex-wrap:wrap; }
+  .row > * { flex:1; text-align:center; text-decoration:none; }
+  .ghost { background:transparent; border:1px solid var(--line); color:var(--text); }
+  #status { margin-top:12px; font-size:.9rem; color:var(--dim); min-height:1.2em; }
+  #status.err { color:var(--err); }
+  .libs { display:grid; gap:6px; max-height:340px; overflow:auto; margin-top:8px; }
+  .libs label { display:flex; align-items:center; gap:8px; margin:0; color:var(--text); font-size:.95rem; }
+  .libs small { color:var(--dim); margin-left:auto; }
+  .hdr { display:flex; justify-content:space-between; align-items:center; }
+  .hdr a { color:var(--dim); font-size:.85rem; cursor:pointer; }
+  textarea { width:100%; min-height:90px; margin-top:8px; padding:10px; border-radius:8px; border:1px solid var(--line); background:#0c0e12; color:var(--text); font:12px/1.4 ui-monospace,monospace; word-break:break-all; }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Emby Direct</h1>
+  <p class="sub">Browse and stream your Emby libraries in Nuvio or Stremio.</p>
+
+  <div class="card">
+    <div class="tabs">
+      <button type="button" id="tabLogin" class="on">Username &amp; password</button>
+      <button type="button" id="tabToken">Access token</button>
+    </div>
+    <label for="embyUrl">Emby server URL</label>
+    <input type="url" id="embyUrl" placeholder="https://your-server.example.com" autocomplete="url">
+    <div id="loginFields">
+      <label for="username">Username</label>
+      <input type="text" id="username" autocomplete="username">
+      <label for="password">Password</label>
+      <input type="password" id="password" autocomplete="current-password">
+    </div>
+    <div id="tokenFields" class="hidden">
+      <label for="userId">User ID</label>
+      <input type="text" id="userId">
+      <label for="accessToken">Access token</label>
+      <input type="text" id="accessToken">
+    </div>
+    <div class="row"><button type="button" id="connect">Connect</button></div>
+    <div id="status"></div>
+  </div>
+
+  <div class="card hidden" id="libCard">
+    <div class="hdr"><strong>Libraries to show</strong><a id="toggleAll">Select none</a></div>
+    <div class="libs" id="libs"></div>
+  </div>
+
+  <div class="card hidden" id="installCard">
+    <strong>Install</strong>
+    <p class="sub" style="margin:4px 0 0">In Nuvio, open Settings → Addons, paste this URL. It contains your access token, so keep it private.</p>
+    <textarea id="manifestUrl" readonly></textarea>
+    <div class="row">
+      <button type="button" id="copy" class="ghost">Copy URL</button>
+      <a id="installStremio" href="#"><button type="button" style="width:100%">Install in Stremio</button></a>
+    </div>
+  </div>
+</main>
+<script>
+  const $ = (s) => document.querySelector(s);
+  let mode = 'login';
+  let session = null;
+
+  function setMode(m) {
+    mode = m;
+    $('#tabLogin').classList.toggle('on', m === 'login');
+    $('#tabToken').classList.toggle('on', m === 'token');
+    $('#loginFields').classList.toggle('hidden', m !== 'login');
+    $('#tokenFields').classList.toggle('hidden', m !== 'token');
+  }
+  $('#tabLogin').onclick = () => setMode('login');
+  $('#tabToken').onclick = () => setMode('token');
+
+  function status(msg, isErr) {
+    $('#status').textContent = msg;
+    $('#status').classList.toggle('err', !!isErr);
+  }
+
+  function b64url(obj) {
+    const bytes = new TextEncoder().encode(JSON.stringify(obj));
+    let bin = '';
+    bytes.forEach((b) => { bin += String.fromCharCode(b); });
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  function selectedLibs() {
+    return [...document.querySelectorAll('#libs input:checked')].map((i) => i.value);
+  }
+
+  function updateUrl() {
+    if (!session) return;
+    const libs = selectedLibs();
+    const all = libs.length === session.libraries.length;
+    const cfg = { embyUrl: session.embyUrl, userId: session.userId, accessToken: session.accessToken };
+    if (!all) cfg.libs = libs;
+    const url = location.origin + '/' + b64url(cfg) + '/manifest.json';
+    $('#manifestUrl').value = url;
+    $('#installStremio').href = url.replace(/^https?:/, 'stremio:');
+    $('#toggleAll').textContent = libs.length ? 'Select none' : 'Select all';
+  }
+
+  function renderLibs(libraries, preselected) {
+    const box = $('#libs');
+    box.innerHTML = '';
+    libraries.forEach((l) => {
+      const row = document.createElement('label');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = l.id;
+      cb.checked = !preselected || preselected.includes(l.id);
+      cb.onchange = updateUrl;
+      const name = document.createElement('span');
+      name.textContent = l.name;
+      const kind = document.createElement('small');
+      kind.textContent = l.type === 'series' ? 'TV' : 'Movies';
+      row.append(cb, name, kind);
+      box.appendChild(row);
+    });
+  }
+
+  $('#toggleAll').onclick = () => {
+    const boxes = [...document.querySelectorAll('#libs input')];
+    const anyChecked = boxes.some((b) => b.checked);
+    boxes.forEach((b) => { b.checked = !anyChecked; });
+    updateUrl();
+  };
+
+  async function connect(body, preselected) {
+    $('#connect').disabled = true;
+    status('Connecting…');
+    try {
+      const res = await fetch('/api/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.err || 'HTTP ' + res.status);
+      session = data;
+      status('Connected to ' + (data.serverName || 'Emby') + ' · ' + data.libraries.length + ' libraries found');
+      renderLibs(data.libraries, preselected);
+      $('#libCard').classList.remove('hidden');
+      $('#installCard').classList.remove('hidden');
+      updateUrl();
+    } catch (err) {
+      status(err.message, true);
+    } finally {
+      $('#connect').disabled = false;
+    }
+  }
+
+  $('#connect').onclick = () => {
+    const embyUrl = $('#embyUrl').value.trim();
+    if (mode === 'login') {
+      connect({ embyUrl, username: $('#username').value.trim(), password: $('#password').value });
+    } else {
+      connect({ embyUrl, userId: $('#userId').value.trim(), accessToken: $('#accessToken').value.trim() });
+    }
+  };
+
+  $('#copy').onclick = async () => {
+    try { await navigator.clipboard.writeText($('#manifestUrl').value); $('#copy').textContent = 'Copied'; }
+    catch (e) { $('#manifestUrl').select(); }
+    setTimeout(() => { $('#copy').textContent = 'Copy URL'; }, 1500);
+  };
+
+  // Reconfigure: /<config>/configure pre-fills from the existing install.
+  (function prefill() {
+    const seg = location.pathname.split('/').filter(Boolean);
+    if (seg.length < 2) return;
+    try {
+      const raw = JSON.parse(atob(seg[0].replace(/-/g, '+').replace(/_/g, '/')));
+      const embyUrl = raw.embyUrl || raw.serverUrl;
+      if (!embyUrl || !raw.userId || !raw.accessToken) return;
+      $('#embyUrl').value = embyUrl;
+      $('#userId').value = raw.userId;
+      $('#accessToken').value = raw.accessToken;
+      setMode('token');
+      connect({ embyUrl, userId: raw.userId, accessToken: raw.accessToken }, raw.libs);
+    } catch (e) { /* not a config segment */ }
+  })();
+</script>
+</body>
+</html>

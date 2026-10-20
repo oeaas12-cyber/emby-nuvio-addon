@@ -1,0 +1,17 @@
+{
+  "name": "emby-nuvio-addon",
+  "version": "2.0.0",
+  "description": "Direct Emby-to-Nuvio (Stremio protocol) addon with per-library catalogs",
+  "main": "addon.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node addon.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^4.22.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

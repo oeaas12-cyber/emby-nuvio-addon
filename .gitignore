@@ -1,0 +1,4 @@
+node_modules/
+addon.log
+addon.pid
+*.bak
