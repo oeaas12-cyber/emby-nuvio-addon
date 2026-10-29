@@ -13,10 +13,27 @@ const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
 
-const APP_VERSION = '2.9.1';
+const APP_VERSION = '3.0.0';
 const CLIENT_NAME = 'NuvioEmbyBridge';
 const DEVICE_ID = 'nuvio-emby-bridge-001';
 const PAGE_SIZE = 100;
+
+// Sort choices shown in each library's filter dropdown (the "genre" extra,
+// the third dropdown in Nuvio's Discover), in English and Arabic. Leaving it
+// on Nuvio's default entry lists the library A–Z. Emby does the sorting, so
+// the whole library is in order, not just the loaded page.
+const SORTS = [
+  { label: 'Z–A · ي–أ', sortBy: 'SortName', order: 'Descending' },
+  { label: 'Recently Added · الأحدث إضافة', sortBy: 'DateCreated,SortName', order: 'Descending' },
+  { label: 'New Episodes · حلقات جديدة', sortBy: 'DateLastContentAdded,SortName', order: 'Descending', seriesOnly: true },
+  { label: 'Year: Newest · الأحدث سنة', sortBy: 'ProductionYear,PremiereDate,SortName', order: 'Descending' },
+  { label: 'Year: Oldest · الأقدم سنة', sortBy: 'ProductionYear,PremiereDate,SortName', order: 'Ascending' },
+  { label: 'Top Rated · الأعلى تقييماً', sortBy: 'CommunityRating,SortName', order: 'Descending' }
+];
+
+function sortsFor(type) {
+  return SORTS.filter(function (sort) { return !sort.seriesOnly || type === 'series'; });
+}
 
 // --- Config ------------------------------------------------------------
 
@@ -232,18 +249,18 @@ async function buildManifest(cfg) {
     libs = libs.filter(function (l) { return cfg.libs.indexOf(l.id) !== -1; });
   }
 
-  const genreLists = await Promise.allSettled(libs.map(function (l) { return getGenres(cfg, l); }));
-
   const catalogs = [];
   const types = new Set(libs.map(function (l) { return l.type; }));
 
   if (types.has('movie')) catalogs.push({ type: 'movie', id: 'emby-recent-movie', name: 'Emby: Recently Added', extra: [{ name: 'skip' }] });
   if (types.has('series')) catalogs.push({ type: 'series', id: 'emby-recent-series', name: 'Emby: Recently Added', extra: [{ name: 'skip' }] });
 
-  libs.forEach(function (lib, i) {
-    const genres = genreLists[i].status === 'fulfilled' ? genreLists[i].value : [];
-    const genreExtra = { name: 'genre', isRequired: false };
-    if (genres.length) genreExtra.options = mergeGenres(genres);
+  libs.forEach(function (lib) {
+    const genreExtra = {
+      name: 'genre',
+      isRequired: false,
+      options: sortsFor(lib.type).map(function (sort) { return sort.label; })
+    };
     catalogs.push({
       type: lib.type,
       id: 'emby-lib-' + lib.id,
@@ -343,9 +360,12 @@ async function handleCatalog(cfg, type, id, extra) {
 
   if (id.indexOf('emby-lib-') === 0) {
     params.ParentId = id.slice('emby-lib-'.length);
-    params.SortBy = 'SortName';
-    params.SortOrder = 'Ascending';
-    if (extra.genre) {
+    // The filter value is a sort choice; none means A–Z. Anything else is
+    // treated as a genre (links or apps that still send one).
+    const sort = sortsFor(type).find(function (s) { return s.label === extra.genre; });
+    params.SortBy = sort ? sort.sortBy : 'SortName';
+    params.SortOrder = sort ? sort.order : 'Ascending';
+    if (extra.genre && !sort) {
       const lib = (await getLibraries(cfg)).find(function (l) { return l.id === params.ParentId; });
       params.Genres = lib ? await genreFilterFor(cfg, lib, extra.genre) : extra.genre;
     }
