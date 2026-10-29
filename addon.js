@@ -13,7 +13,7 @@ const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
 
-const APP_VERSION = '2.7.0';
+const APP_VERSION = '2.8.0';
 const CLIENT_NAME = 'NuvioEmbyBridge';
 const DEVICE_ID = 'nuvio-emby-bridge-001';
 const PAGE_SIZE = 100;
@@ -153,8 +153,6 @@ async function buildManifest(cfg) {
 
   if (types.has('movie')) catalogs.push({ type: 'movie', id: 'emby-recent-movie', name: 'Emby: Recently Added', extra: [{ name: 'skip' }] });
   if (types.has('series')) catalogs.push({ type: 'series', id: 'emby-recent-series', name: 'Emby: Recently Added', extra: [{ name: 'skip' }] });
-  // Shows with the most recently added episodes first.
-  if (types.has('series')) catalogs.push({ type: 'series', id: 'emby-new-episodes', name: 'Emby: New Episodes · حلقات جديدة', extra: [{ name: 'skip' }] });
 
   libs.forEach(function (lib, i) {
     const genres = genreLists[i].status === 'fulfilled' ? genreLists[i].value : [];
@@ -239,6 +237,14 @@ function toMeta(cfg, item) {
 // --- Catalogs -------------------------------------------------------------
 
 async function handleCatalog(cfg, type, id, extra) {
+  // A "~episodes" suffix on a series catalog id (sent by Nuvio's "New
+  // Episodes" sort) lists shows with the most recently added episodes first.
+  let newEpisodes = false;
+  if (/~episodes$/.test(id)) {
+    if (type !== 'series') return { metas: [] };
+    newEpisodes = true;
+    id = id.replace(/~episodes$/, '');
+  }
   const itemType = type === 'series' ? 'Series' : 'Movie';
   const params = {
     Recursive: 'true',
@@ -254,10 +260,6 @@ async function handleCatalog(cfg, type, id, extra) {
     params.SortBy = 'SortName';
     params.SortOrder = 'Ascending';
     if (extra.genre) params.Genres = extra.genre;
-  } else if (id === 'emby-new-episodes') {
-    if (type !== 'series') return { metas: [] };
-    params.SortBy = 'DateLastContentAdded,SortName';
-    params.SortOrder = 'Descending';
   } else if (id.indexOf('emby-recent-') === 0) {
     params.SortBy = 'DateCreated,SortName';
     params.SortOrder = 'Descending';
@@ -269,7 +271,13 @@ async function handleCatalog(cfg, type, id, extra) {
     return { metas: [] };
   }
 
-  // Recently Added / New Episodes / search should respect the libraries the user picked.
+  if (newEpisodes) {
+    if (id.indexOf('emby-search-') === 0) return { metas: [] };
+    params.SortBy = 'DateLastContentAdded,SortName';
+    params.SortOrder = 'Descending';
+  }
+
+  // Recently Added / search should respect the libraries the user picked.
   if (!params.ParentId && cfg.libs && cfg.libs.length) {
     const libs = (await getLibraries(cfg)).filter(function (l) {
       return l.type === type && cfg.libs.indexOf(l.id) !== -1;

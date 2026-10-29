@@ -4,7 +4,7 @@ A Nuvio / Stremio addon that turns your Emby server into browsable catalogs and 
 
 - One catalog per Emby movie and TV library, with genre filters
 - "Recently Added" rows and search
-- "New Episodes" row for TV: shows with the most recently added episodes first
+- "New Episodes" sort for TV catalogs (used by Nuvio's Sort By menu): series catalog ids ending in `~episodes` list shows with the most recently added episodes first
 - Full episode lists for series
 - Every copy of a title (e.g. 1080p and 4K libraries) offered as a separate stream, with subtitles
 - Works with IMDb (`tt…`), TMDB (`tmdb:…`) and Emby-only items
