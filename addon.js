@@ -13,21 +13,22 @@ const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
 
-const APP_VERSION = '2.1.0';
+const APP_VERSION = '2.2.0';
 const CLIENT_NAME = 'NuvioEmbyBridge';
 const DEVICE_ID = 'nuvio-emby-bridge-001';
 const PAGE_SIZE = 100;
 
-// Sorted catalogs offered in Discover ("Emby: A–Z" etc.). Emby does the
+// Sort choices shown at the top of each library's filter dropdown (the
+// "genre" extra, the only filter Nuvio's Discover shows). Emby does the
 // sorting, so the whole library is in order, not just the loaded page.
 const SORTS = [
-  { key: 'az', name: 'A–Z', sortBy: 'SortName', order: 'Ascending' },
-  { key: 'za', name: 'Z–A', sortBy: 'SortName', order: 'Descending' },
-  { key: 'year-new', name: 'Year (Newest)', sortBy: 'ProductionYear,PremiereDate,SortName', order: 'Descending' },
-  { key: 'year-old', name: 'Year (Oldest)', sortBy: 'ProductionYear,PremiereDate,SortName', order: 'Ascending' },
-  { key: 'rating', name: 'Top Rated', sortBy: 'CommunityRating,SortName', order: 'Descending' }
+  { label: 'Sort: A–Z', sortBy: 'SortName', order: 'Ascending' },
+  { label: 'Sort: Z–A', sortBy: 'SortName', order: 'Descending' },
+  { label: 'Sort: Recently Added', sortBy: 'DateCreated,SortName', order: 'Descending' },
+  { label: 'Sort: Year (Newest)', sortBy: 'ProductionYear,PremiereDate,SortName', order: 'Descending' },
+  { label: 'Sort: Year (Oldest)', sortBy: 'ProductionYear,PremiereDate,SortName', order: 'Ascending' },
+  { label: 'Sort: Top Rated', sortBy: 'CommunityRating,SortName', order: 'Descending' }
 ];
-const ALL_GENRES = 'All';
 
 // --- Config ------------------------------------------------------------
 
@@ -167,34 +168,16 @@ async function buildManifest(cfg) {
 
   libs.forEach(function (lib, i) {
     const genres = genreLists[i].status === 'fulfilled' ? genreLists[i].value : [];
-    const genreExtra = { name: 'genre', isRequired: false };
-    if (genres.length) genreExtra.options = genres;
+    const genreExtra = {
+      name: 'genre',
+      isRequired: false,
+      options: SORTS.map(function (sort) { return sort.label; }).concat(genres)
+    };
     catalogs.push({
       type: lib.type,
       id: 'emby-lib-' + lib.id,
       name: 'Emby: ' + lib.name,
       extra: [genreExtra, { name: 'skip' }]
-    });
-  });
-
-  // Sorted catalogs for Discover. They span every chosen library of the type
-  // and keep the genre filter. A required genre (first option "All") plus
-  // showInHome:false keeps them off the home screen in Nuvio's apps.
-  types.forEach(function (type) {
-    const genreSet = new Set();
-    libs.forEach(function (lib, i) {
-      if (lib.type !== type || genreLists[i].status !== 'fulfilled') return;
-      genreLists[i].value.forEach(function (g) { genreSet.add(g); });
-    });
-    const genreOptions = [ALL_GENRES].concat(Array.from(genreSet).sort(function (a, b) { return a.localeCompare(b); }));
-    SORTS.forEach(function (sort) {
-      catalogs.push({
-        type: type,
-        id: 'emby-sort-' + sort.key + '-' + type,
-        name: 'Emby: ' + sort.name,
-        showInHome: false,
-        extra: [{ name: 'genre', isRequired: true, options: genreOptions }, { name: 'skip' }]
-      });
     });
   });
 
@@ -281,15 +264,11 @@ async function handleCatalog(cfg, type, id, extra) {
 
   if (id.indexOf('emby-lib-') === 0) {
     params.ParentId = id.slice('emby-lib-'.length);
-    params.SortBy = 'SortName';
-    params.SortOrder = 'Ascending';
-    if (extra.genre) params.Genres = extra.genre;
-  } else if (id.indexOf('emby-sort-') === 0) {
-    const sort = SORTS.find(function (s) { return id === 'emby-sort-' + s.key + '-' + type; });
-    if (!sort) return { metas: [] };
-    params.SortBy = sort.sortBy;
-    params.SortOrder = sort.order;
-    if (extra.genre && extra.genre !== ALL_GENRES) params.Genres = extra.genre;
+    // The filter value is either a sort choice or a genre (genres list A–Z).
+    const sort = SORTS.find(function (s) { return s.label === extra.genre; });
+    params.SortBy = sort ? sort.sortBy : 'SortName';
+    params.SortOrder = sort ? sort.order : 'Ascending';
+    if (extra.genre && !sort) params.Genres = extra.genre;
   } else if (id.indexOf('emby-recent-') === 0) {
     params.SortBy = 'DateCreated,SortName';
     params.SortOrder = 'Descending';
@@ -301,7 +280,7 @@ async function handleCatalog(cfg, type, id, extra) {
     return { metas: [] };
   }
 
-  // Recently Added / sorted / search should respect the libraries the user picked.
+  // Recently Added / search should respect the libraries the user picked.
   if (!params.ParentId && cfg.libs && cfg.libs.length) {
     const libs = (await getLibraries(cfg)).filter(function (l) {
       return l.type === type && cfg.libs.indexOf(l.id) !== -1;
