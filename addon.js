@@ -13,27 +13,10 @@ const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
 
-const APP_VERSION = '2.5.0';
+const APP_VERSION = '2.6.0';
 const CLIENT_NAME = 'NuvioEmbyBridge';
 const DEVICE_ID = 'nuvio-emby-bridge-001';
 const PAGE_SIZE = 100;
-
-// Sort choices shown in each library's filter dropdown (the "genre" extra,
-// the only filter Nuvio's Discover shows), in English and Arabic. Nuvio adds
-// its own "All Genres" entry on top, which shows the library A–Z. Emby does
-// the sorting, so the whole library is in order, not just the loaded page.
-const SORTS = [
-  { label: 'Z–A · ي–أ', sortBy: 'SortName', order: 'Descending' },
-  { label: 'Recently Added · الأحدث إضافة', sortBy: 'DateCreated,SortName', order: 'Descending' },
-  { label: 'New Episodes · حلقات جديدة', sortBy: 'DateLastContentAdded,SortName', order: 'Descending', seriesOnly: true },
-  { label: 'Year: Newest · الأحدث سنة', sortBy: 'ProductionYear,PremiereDate,SortName', order: 'Descending' },
-  { label: 'Year: Oldest · الأقدم سنة', sortBy: 'ProductionYear,PremiereDate,SortName', order: 'Ascending' },
-  { label: 'Top Rated · الأعلى تقييماً', sortBy: 'CommunityRating,SortName', order: 'Descending' }
-];
-
-function sortsFor(type) {
-  return SORTS.filter(function (sort) { return !sort.seriesOnly || type === 'series'; });
-}
 
 // --- Config ------------------------------------------------------------
 
@@ -108,8 +91,8 @@ async function embyLogin(embyUrl, username, password) {
   return { userId: data.User.Id, accessToken: data.AccessToken };
 }
 
-// Small TTL cache so manifest/catalog requests don't refetch libraries
-// every time.
+// Small TTL cache so manifest/catalog requests don't refetch libraries and
+// genres every time.
 const cache = new Map();
 async function cached(key, ttlMs, fn) {
   const hit = cache.get(key);
@@ -142,6 +125,19 @@ async function getLibraries(cfg) {
   });
 }
 
+async function getGenres(cfg, lib) {
+  return cached('genres|' + cfgKey(cfg) + '|' + lib.id, 60 * 60 * 1000, async function () {
+    const data = await embyGet(cfg, '/Genres', {
+      UserId: cfg.userId,
+      ParentId: lib.id,
+      IncludeItemTypes: lib.itemType,
+      Recursive: 'true',
+      SortBy: 'SortName'
+    });
+    return (data.Items || []).map(function (g) { return g.Name; });
+  });
+}
+
 // --- Manifest ------------------------------------------------------------
 
 async function buildManifest(cfg) {
@@ -150,18 +146,18 @@ async function buildManifest(cfg) {
     libs = libs.filter(function (l) { return cfg.libs.indexOf(l.id) !== -1; });
   }
 
+  const genreLists = await Promise.allSettled(libs.map(function (l) { return getGenres(cfg, l); }));
+
   const catalogs = [];
   const types = new Set(libs.map(function (l) { return l.type; }));
 
   if (types.has('movie')) catalogs.push({ type: 'movie', id: 'emby-recent-movie', name: 'Emby: Recently Added', extra: [{ name: 'skip' }] });
   if (types.has('series')) catalogs.push({ type: 'series', id: 'emby-recent-series', name: 'Emby: Recently Added', extra: [{ name: 'skip' }] });
 
-  libs.forEach(function (lib) {
-    const genreExtra = {
-      name: 'genre',
-      isRequired: false,
-      options: sortsFor(lib.type).map(function (sort) { return sort.label; })
-    };
+  libs.forEach(function (lib, i) {
+    const genres = genreLists[i].status === 'fulfilled' ? genreLists[i].value : [];
+    const genreExtra = { name: 'genre', isRequired: false };
+    if (genres.length) genreExtra.options = genres;
     catalogs.push({
       type: lib.type,
       id: 'emby-lib-' + lib.id,
@@ -253,10 +249,9 @@ async function handleCatalog(cfg, type, id, extra) {
 
   if (id.indexOf('emby-lib-') === 0) {
     params.ParentId = id.slice('emby-lib-'.length);
-    // The filter value is a sort choice; none ("All Genres") means A–Z.
-    const sort = sortsFor(type).find(function (s) { return s.label === extra.genre; });
-    params.SortBy = sort ? sort.sortBy : 'SortName';
-    params.SortOrder = sort ? sort.order : 'Ascending';
+    params.SortBy = 'SortName';
+    params.SortOrder = 'Ascending';
+    if (extra.genre) params.Genres = extra.genre;
   } else if (id.indexOf('emby-recent-') === 0) {
     params.SortBy = 'DateCreated,SortName';
     params.SortOrder = 'Descending';
