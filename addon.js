@@ -13,7 +13,7 @@ const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
 
-const APP_VERSION = '2.8.0';
+const APP_VERSION = '2.9.0';
 const CLIENT_NAME = 'NuvioEmbyBridge';
 const DEVICE_ID = 'nuvio-emby-bridge-001';
 const PAGE_SIZE = 100;
@@ -138,6 +138,92 @@ async function getGenres(cfg, lib) {
   });
 }
 
+// Emby often has the same genre in Arabic and English (metadata fetched in
+// different languages). Arabic names are mapped to the English genre so the
+// filter lists each genre once; filtering by it matches both names.
+const ARABIC_GENRES = {
+  'Action': ['أكشن', 'اكشن', 'حركة', 'حركه', 'إثارة وحركة'],
+  'Adventure': ['مغامرة', 'مغامرات', 'مغامره'],
+  'Action & Adventure': ['حركة ومغامرة', 'حركة و مغامرة', 'أكشن ومغامرة', 'أكشن و مغامرة', 'اكشن ومغامرة'],
+  'Biography': ['سيرة ذاتية', 'سيره ذاتيه', 'سيرة', 'سير ذاتية'],
+  'Animation': ['رسوم متحركة', 'رسوم متحركه', 'أنيميشن', 'انيميشن', 'أنمي', 'انمي'],
+  'Comedy': ['كوميديا', 'كوميدي', 'كوميدية', 'كوميديه'],
+  'Crime': ['جريمة', 'جرائم', 'جريمه'],
+  'Documentary': ['وثائقي', 'وثائقية', 'وثائقيه', 'وثائقى'],
+  'Drama': ['دراما', 'درامي', 'دراما اجتماعية'],
+  'Family': ['عائلي', 'عائلية', 'عائلى', 'عائليه', 'أسري', 'اسري'],
+  'Fantasy': ['فانتازيا', 'خيال', 'خيالي', 'فنتازيا'],
+  'History': ['تاريخ', 'تاريخي', 'تاريخية', 'تاريخى'],
+  'Horror': ['رعب'],
+  'Kids': ['أطفال', 'اطفال'],
+  'Music': ['موسيقى', 'موسيقي', 'موسيقية'],
+  'Musical': ['موسيقي استعراضي', 'استعراضي'],
+  'Mystery': ['غموض', 'غموض وتشويق'],
+  'News': ['أخبار', 'اخبار'],
+  'Reality': ['واقعي', 'تلفزيون الواقع', 'واقع'],
+  'Romance': ['رومانسي', 'رومانسية', 'رومانسى', 'رومانسيه', 'رومانس'],
+  'Science Fiction': ['خيال علمي', 'خيال علمى'],
+  'Sci-Fi & Fantasy': ['خيال علمي وفانتازيا', 'خيال علمي و فانتازيا', 'خيال علمي وخيال'],
+  'Soap': ['مسلسل درامي طويل', 'دراما طويلة', 'صابون'],
+  'Sport': ['رياضة', 'رياضي', 'رياضية'],
+  'Talk': ['حوار', 'حواري', 'برامج حوارية'],
+  'Thriller': ['إثارة', 'اثارة', 'تشويق', 'إثارة وتشويق', 'اثاره'],
+  'TV Movie': ['فيلم تلفزيوني', 'فيلم تليفزيوني'],
+  'War': ['حرب', 'حربي', 'حروب'],
+  'War & Politics': ['حرب وسياسة', 'حرب و سياسة', 'حروب وسياسة'],
+  'Western': ['غربي', 'ويسترن', 'الغرب الأمريكي', 'غرب أمريكي']
+};
+
+function normalizeGenre(name) {
+  return String(name).trim()
+    .replace(/[\u064B-\u0652\u0640]/g, '') // tashkeel and tatweel
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي')
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+const ARABIC_TO_ENGLISH = new Map();
+Object.keys(ARABIC_GENRES).forEach(function (english) {
+  ARABIC_GENRES[english].forEach(function (arabic) { ARABIC_TO_ENGLISH.set(normalizeGenre(arabic), english); });
+});
+
+function englishGenreOf(name) {
+  return ARABIC_TO_ENGLISH.get(normalizeGenre(name)) || null;
+}
+
+// Each genre once: English names (and mapped Arabic ones) A–Z, then any
+// Arabic genres that have no English match.
+function mergeGenres(names) {
+  const english = new Map(); // lowercased -> display name
+  const unmatched = [];
+  names.forEach(function (name) {
+    const mapped = englishGenreOf(name);
+    const target = mapped || (/[\u0600-\u06FF]/.test(name) ? null : name);
+    if (target) {
+      if (!english.has(target.toLowerCase())) english.set(target.toLowerCase(), target);
+    } else if (unmatched.indexOf(name) === -1) {
+      unmatched.push(name);
+    }
+  });
+  const merged = Array.from(english.values()).sort(function (a, b) { return a.localeCompare(b); });
+  return merged.concat(unmatched);
+}
+
+// All names in this library that mean the chosen genre, pipe-joined for
+// Emby's Genres filter (which matches any of them).
+async function genreFilterFor(cfg, lib, chosen) {
+  let names = [];
+  try { names = await getGenres(cfg, lib); } catch (e) { names = []; }
+  const wanted = chosen.toLowerCase();
+  const matches = names.filter(function (name) {
+    return name.toLowerCase() === wanted || (englishGenreOf(name) || '').toLowerCase() === wanted;
+  });
+  if (matches.indexOf(chosen) === -1) matches.unshift(chosen);
+  return matches.join('|');
+}
+
 // --- Manifest ------------------------------------------------------------
 
 async function buildManifest(cfg) {
@@ -157,7 +243,7 @@ async function buildManifest(cfg) {
   libs.forEach(function (lib, i) {
     const genres = genreLists[i].status === 'fulfilled' ? genreLists[i].value : [];
     const genreExtra = { name: 'genre', isRequired: false };
-    if (genres.length) genreExtra.options = genres;
+    if (genres.length) genreExtra.options = mergeGenres(genres);
     catalogs.push({
       type: lib.type,
       id: 'emby-lib-' + lib.id,
@@ -259,7 +345,10 @@ async function handleCatalog(cfg, type, id, extra) {
     params.ParentId = id.slice('emby-lib-'.length);
     params.SortBy = 'SortName';
     params.SortOrder = 'Ascending';
-    if (extra.genre) params.Genres = extra.genre;
+    if (extra.genre) {
+      const lib = (await getLibraries(cfg)).find(function (l) { return l.id === params.ParentId; });
+      params.Genres = lib ? await genreFilterFor(cfg, lib, extra.genre) : extra.genre;
+    }
   } else if (id.indexOf('emby-recent-') === 0) {
     params.SortBy = 'DateCreated,SortName';
     params.SortOrder = 'Descending';
