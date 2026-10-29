@@ -13,22 +13,25 @@ const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
 
-const APP_VERSION = '2.2.0';
+const APP_VERSION = '2.3.0';
 const CLIENT_NAME = 'NuvioEmbyBridge';
 const DEVICE_ID = 'nuvio-emby-bridge-001';
 const PAGE_SIZE = 100;
 
-// Sort choices shown at the top of each library's filter dropdown (the
-// "genre" extra, the only filter Nuvio's Discover shows). Emby does the
+// Sorted versions of each library, listed in Discover's Catalog dropdown as
+// "Emby: Movies · Year (Newest) · السنة (الأحدث)". The genre filter stays a
+// separate dropdown, so a genre and a sort can be combined. Emby does the
 // sorting, so the whole library is in order, not just the loaded page.
+// The plain library catalog ("Emby: Movies") is already A–Z.
 const SORTS = [
-  { label: 'Sort: A–Z', sortBy: 'SortName', order: 'Ascending' },
-  { label: 'Sort: Z–A', sortBy: 'SortName', order: 'Descending' },
-  { label: 'Sort: Recently Added', sortBy: 'DateCreated,SortName', order: 'Descending' },
-  { label: 'Sort: Year (Newest)', sortBy: 'ProductionYear,PremiereDate,SortName', order: 'Descending' },
-  { label: 'Sort: Year (Oldest)', sortBy: 'ProductionYear,PremiereDate,SortName', order: 'Ascending' },
-  { label: 'Sort: Top Rated', sortBy: 'CommunityRating,SortName', order: 'Descending' }
+  { key: 'za', en: 'Z–A', ar: 'الاسم (ي–أ)', sortBy: 'SortName', order: 'Descending' },
+  { key: 'added', en: 'Recently Added', ar: 'المضاف حديثاً', sortBy: 'DateCreated,SortName', order: 'Descending' },
+  { key: 'episodes', en: 'Recently Added Episodes', ar: 'أحدث الحلقات المضافة', sortBy: 'DateLastContentAdded,SortName', order: 'Descending', seriesOnly: true },
+  { key: 'year-new', en: 'Year (Newest)', ar: 'السنة (الأحدث)', sortBy: 'ProductionYear,PremiereDate,SortName', order: 'Descending' },
+  { key: 'year-old', en: 'Year (Oldest)', ar: 'السنة (الأقدم)', sortBy: 'ProductionYear,PremiereDate,SortName', order: 'Ascending' },
+  { key: 'rating', en: 'Top Rated', ar: 'الأعلى تقييماً', sortBy: 'CommunityRating,SortName', order: 'Descending' }
 ];
+const ALL_GENRES = 'All · الكل';
 
 // --- Config ------------------------------------------------------------
 
@@ -168,16 +171,29 @@ async function buildManifest(cfg) {
 
   libs.forEach(function (lib, i) {
     const genres = genreLists[i].status === 'fulfilled' ? genreLists[i].value : [];
-    const genreExtra = {
-      name: 'genre',
-      isRequired: false,
-      options: SORTS.map(function (sort) { return sort.label; }).concat(genres)
-    };
+    const genreExtra = { name: 'genre', isRequired: false };
+    if (genres.length) genreExtra.options = genres;
     catalogs.push({
       type: lib.type,
       id: 'emby-lib-' + lib.id,
       name: 'Emby: ' + lib.name,
       extra: [genreExtra, { name: 'skip' }]
+    });
+  });
+
+  // Sorted versions of each library. A required genre (first option "All")
+  // plus showInHome:false keeps them off the home screen in Nuvio's apps.
+  libs.forEach(function (lib, i) {
+    const genres = genreLists[i].status === 'fulfilled' ? genreLists[i].value : [];
+    SORTS.forEach(function (sort) {
+      if (sort.seriesOnly && lib.type !== 'series') return;
+      catalogs.push({
+        type: lib.type,
+        id: 'emby-lib-' + lib.id + '~' + sort.key,
+        name: 'Emby: ' + lib.name + ' · ' + sort.en + ' · ' + sort.ar,
+        showInHome: false,
+        extra: [{ name: 'genre', isRequired: true, options: [ALL_GENRES].concat(genres) }, { name: 'skip' }]
+      });
     });
   });
 
@@ -263,12 +279,17 @@ async function handleCatalog(cfg, type, id, extra) {
   };
 
   if (id.indexOf('emby-lib-') === 0) {
-    params.ParentId = id.slice('emby-lib-'.length);
-    // The filter value is either a sort choice or a genre (genres list A–Z).
-    const sort = SORTS.find(function (s) { return s.label === extra.genre; });
+    // "emby-lib-<libraryId>" is A–Z; "emby-lib-<libraryId>~<sort>" is a sorted version.
+    const parts = id.slice('emby-lib-'.length).split('~');
+    let sort = null;
+    if (parts[1]) {
+      sort = SORTS.find(function (s) { return s.key === parts[1]; });
+      if (!sort || (sort.seriesOnly && type !== 'series')) return { metas: [] };
+    }
+    params.ParentId = parts[0];
     params.SortBy = sort ? sort.sortBy : 'SortName';
     params.SortOrder = sort ? sort.order : 'Ascending';
-    if (extra.genre && !sort) params.Genres = extra.genre;
+    if (extra.genre && extra.genre !== ALL_GENRES) params.Genres = extra.genre;
   } else if (id.indexOf('emby-recent-') === 0) {
     params.SortBy = 'DateCreated,SortName';
     params.SortOrder = 'Descending';

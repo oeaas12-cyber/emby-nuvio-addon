@@ -4,7 +4,7 @@ A Nuvio / Stremio addon that turns your Emby server into browsable catalogs and 
 
 - One catalog per Emby movie and TV library, with genre filters
 - "Recently Added" rows and search
-- Sorting inside each library in Discover: the filter dropdown lists A–Z, Z–A, Recently Added, Year (newest / oldest) and Top Rated before the genres (Emby sorts the whole library)
+- Sorted versions of every library in Discover's Catalog list (English and Arabic names): Z–A, Recently Added, Recently Added Episodes (TV), Year (newest / oldest) and Top Rated; the plain library catalog is A–Z. The genre filter still works with each one, and they stay off the home screen. Emby sorts the whole library.
 - Full episode lists for series
 - Every copy of a title (e.g. 1080p and 4K libraries) offered as a separate stream, with subtitles
 - Works with IMDb (`tt…`), TMDB (`tmdb:…`) and Emby-only items
