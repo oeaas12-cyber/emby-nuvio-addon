@@ -136,12 +136,17 @@
     return [...document.querySelectorAll('#libs input:checked')].map((i) => i.value);
   }
 
+  const LINK_STAMP = Date.now().toString(36);
+
   function updateUrl() {
     if (!session) return;
     const libs = selectedLibs();
     const all = libs.length === session.libraries.length;
     const cfg = { embyUrl: session.embyUrl, userId: session.userId, accessToken: session.accessToken };
     if (!all) cfg.libs = libs;
+    // Unique per generated link, so a CDN can never answer it with an old
+    // cached manifest (the addon ignores this field).
+    cfg.v = LINK_STAMP;
     const url = location.origin + '/' + b64url(cfg) + '/manifest.json';
     $('#manifestUrl').value = url;
     $('#installStremio').href = url.replace(/^https?:/, 'stremio:');

@@ -13,7 +13,7 @@ const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
 
-const APP_VERSION = '2.9.0';
+const APP_VERSION = '2.9.1';
 const CLIENT_NAME = 'NuvioEmbyBridge';
 const DEVICE_ID = 'nuvio-emby-bridge-001';
 const PAGE_SIZE = 100;
@@ -567,6 +567,15 @@ function sendJson(res, body, maxAge) {
   res.json(body);
 }
 
+// Manifests must never be cached: BeamUp's Cloudflare kept serving an old
+// version to some devices for hours after a deploy.
+function sendManifest(res, body) {
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  res.setHeader('CDN-Cache-Control', 'no-store');
+  res.setHeader('Cloudflare-CDN-Cache-Control', 'no-store');
+  res.json(body);
+}
+
 // Parses Stremio's extra segment, e.g. "genre=Action&skip=100".
 function parseExtra(str) {
   const out = {};
@@ -610,7 +619,7 @@ app.post('/api/connect', async function (req, res) {
 app.get('/manifest.json', function (req, res) {
   // Unconfigured manifest so the addon can be "installed" to reach the
   // configure page.
-  sendJson(res, {
+  sendManifest(res, {
     id: 'org.nuvio.embydirect',
     version: APP_VERSION,
     name: 'Emby Direct',
@@ -626,7 +635,7 @@ app.get('/:cfg/manifest.json', async function (req, res) {
   const cfg = decodeConfig(req.params.cfg);
   if (!cfg) return res.status(400).json({ err: 'Invalid config' });
   try {
-    sendJson(res, await buildManifest(cfg), 300);
+    sendManifest(res, await buildManifest(cfg));
   } catch (err) {
     console.error('Manifest error:', err.message);
     res.status(502).json({ err: err.message });
